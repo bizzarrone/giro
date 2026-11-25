@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Stesse esclusioni di data_extraction_rules.xml, per Android 8-11 (minSdk 26). -->
+<full-backup-content>
+    <exclude domain="sharedpref" path="girocalendar_emergency.xml" />
+    <exclude domain="database" path="." />
+</full-backup-content>

@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Backup cloud e trasferimento a un nuovo telefono (Android 12+): restano le preferenze dell'app, NON i contatti
+     di emergenza (nomi e numeri in chiaro) né la cache Firestore (foto, GPX, email private: si riscarica da sola). -->
+<data-extraction-rules>
+    <cloud-backup>
+        <exclude domain="sharedpref" path="girocalendar_emergency.xml" />
+        <exclude domain="database" path="." />
+    </cloud-backup>
+    <device-transfer>
+        <exclude domain="sharedpref" path="girocalendar_emergency.xml" />
+        <exclude domain="database" path="." />
+    </device-transfer>
+</data-extraction-rules>
