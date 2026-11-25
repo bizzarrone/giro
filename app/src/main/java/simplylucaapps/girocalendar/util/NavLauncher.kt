@@ -36,6 +36,14 @@ object NavLauncher {
         return null
     }
 
+    /** Solo https verso host Google: prima bastava che l'URL CONTENESSE "google." (es. http://192.168.1.1/?x=google.). */
+    internal fun isGoogleHttps(url: String): Boolean {
+        val u = runCatching { Uri.parse(url) }.getOrNull() ?: return false
+        val h = u.host.orEmpty().lowercase()
+        return u.scheme.equals("https", true) &&
+            (isShort(url) || h == "google.com" || h.endsWith(".google.com") || Regex("""^(.+\.)?google\.[a-z]{2,3}(\.[a-z]{2})?$""").matches(h))
+    }
+
     private fun isShort(url: String): Boolean {
         val h = runCatching { Uri.parse(url).host.orEmpty() }.getOrDefault("")
         return h == "maps.app.goo.gl" || h == "goo.gl" || h == "g.co"
@@ -44,10 +52,11 @@ object NavLauncher {
     /** Da chiamare fuori dal thread principale: segue i link corti e ricava le coordinate. */
     fun resolve(url: String): Dest {
         parseCoords(url)?.let { return Dest(url, it.first, it.second) }
-        if (!isShort(url) && !url.contains("google.", true)) return Dest(url, null, null)
+        if (!isGoogleHttps(url)) return Dest(url, null, null)
         var cur = url
         runCatching {
             for (i in 0 until 6) {
+                if (!isGoogleHttps(cur)) break // mai seguire redirect verso altri host (LAN, http in chiaro…)
                 val c = (URL(cur).openConnection() as HttpURLConnection).apply {
                     instanceFollowRedirects = false; connectTimeout = 6000; readTimeout = 6000
                     setRequestProperty("User-Agent", "Mozilla/5.0 (Linux; Android 13) GiroCalendar")

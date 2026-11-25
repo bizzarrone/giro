@@ -132,7 +132,7 @@ private fun FlightWebView(html: String, onClose: () -> Unit) {
                 settings.setGeolocationEnabled(true)
                 addJavascriptInterface(object {
                     @JavascriptInterface fun close() { Handler(Looper.getMainLooper()).post { closeNow() } }
-                    @JavascriptInterface fun openUrl(u: String) { Handler(Looper.getMainLooper()).post { runCatching { ctx.startActivity(android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse(u)).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)) } } }
+                    @JavascriptInterface fun openUrl(u: String) { Handler(Looper.getMainLooper()).post { simplylucaapps.girocalendar.util.openWebLink(ctx, u) } }
                     @JavascriptInterface fun locPerm() { Handler(Looper.getMainLooper()).post { askNow() } }
                 }, "Android")
                 webChromeClient = object : android.webkit.WebChromeClient() {

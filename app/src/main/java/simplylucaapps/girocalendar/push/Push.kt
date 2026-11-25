@@ -68,7 +68,7 @@ object Push {
                     requestMethod = "POST"; doOutput = true; connectTimeout = 8000; readTimeout = 8000
                     setRequestProperty("Content-Type", "application/json")
                 }
-                c.outputStream.use { it.write("""{"code":"$code","id":"$id"}""".toByteArray()) }
+                c.outputStream.use { it.write(org.json.JSONObject().put("code", code).put("id", id).toString().toByteArray()) }
                 c.responseCode
                 c.disconnect()
             }

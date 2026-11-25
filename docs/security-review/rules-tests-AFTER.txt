@@ -1,0 +1,26 @@
+ok 1 - [SEC] a logged-in stranger cannot dump every user email by listing emailIndex
+ok 2 - [SEC] emailIndex entry cannot carry arbitrary extra data
+ok 3 - [SEC] cannot register someone else's email in emailIndex
+ok 4 - [COMPAT] login registers own emailIndex entry; invite-by-email lookup (get) works
+ok 5 - [BUG] a user can delete their own emailIndex entry (account deletion / GDPR erasure)
+ok 6 - [SEC] anonymous visitor cannot bloat an event with a huge "participant"
+ok 7 - [SEC] anonymous visitor cannot push a non-string participant
+ok 8 - [COMPAT] anonymous visitor can add / move / remove a name
+ok 9 - [SEC] anonymous visitor still cannot rewrite the list or touch other fields
+ok 10 - [BUG] openCount can be incremented on a calendar that does not have the field yet
+ok 11 - [SEC] openCount cannot be set to an arbitrary value
+ok 12 - [SEC] legacy admins/{uid} entry (no calendar behind it) grants no admin power
+ok 13 - [SEC] admin power is revoked when the calendar is deleted / ownership is lost
+ok 14 - [SEC] cannot self-register as admin for a calendar you do not own
+ok 15 - [COMPAT] a current calendar owner is trail admin (delete trail, read log)
+ok 16 - [COMPAT] create calendar + admins entry + private/owner (CalendarRepository.createCalendar)
+ok 17 - [SEC] a random logged-in user cannot stuff arbitrary fields / blobs into someone else's trail
+ok 18 - [SEC] trailLog entry cannot carry arbitrary fields or a forged identity
+ok 19 - [SEC] POI / zone / trail comment cannot carry arbitrary fields or oversized text
+ok 20 - [COMPAT] trail lifecycle exactly as TrailRepository writes it
+ok 21 - [COMPAT] POI and zone writes exactly as TrailRepository writes them
+ok 22 - [COMPAT] web client writes (giro-web app.js): POI edit, builders, trail merge, participant with display name
+ok 23 - [SEC] nobody but the owner can change ownerUid / editors
+ok 24 - [COMPAT] owner manages editors; editor writes events and can unlink itself
+# pass 24
+# fail 0
