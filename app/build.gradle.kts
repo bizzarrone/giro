@@ -103,10 +103,10 @@ android {
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro",
             )
-            signingConfig = if (keystorePropertiesFile.exists())
-                signingConfigs.getByName("release")
-            else
-                signingConfigs.getByName("debug") // fallback locale, NON per il Play Store
+            // Senza release-keystore/keystore.properties la release resta NON firmata (prima veniva firmata in silenzio con
+            // la chiave debug, password "android"): un APK/AAB così non si installa né si carica, invece di girare per errore.
+            // Per provare in locale c'è la build "beta", firmata con la chiave debug di proposito.
+            signingConfig = if (keystorePropertiesFile.exists()) signingConfigs.getByName("release") else null
         }
         // ApplicationId diverso (+ nome app in src/debug/res) così un debug build si installa
         // fianco a fianco con una release Play Store invece di dare INSTALL_FAILED_UPDATE_INCOMPATIBLE.
