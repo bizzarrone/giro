@@ -19,3 +19,5 @@
 *.keystore
 .kotlin/
 .claude/
+/firestore/tests/node_modules
+*-debug.log

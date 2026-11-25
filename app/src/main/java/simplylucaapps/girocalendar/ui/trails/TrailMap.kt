@@ -1041,7 +1041,7 @@ private fun TrailWebMap(
                         MapViewState.view = v
                         simplylucaapps.girocalendar.data.settings.BootPrefs.setMapView(context, v)
                     } },
-                    { url -> runCatching { context.startActivity(android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse(url)).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)) } },
+                    { url -> simplylucaapps.girocalendar.util.openWebLink(context, url) },
                     { id -> live.zoneBuilders(id) }), "Android")
                 webViewClient = object : WebViewClient() {
                     override fun onPageFinished(view: WebView, url: String?) = live.onPageFinished(view)
