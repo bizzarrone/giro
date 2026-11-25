@@ -131,6 +131,13 @@ class CalendarRepository(
     suspend fun backfillOwnerEmail(code: String, current: RideCalendar) {
         val user = auth.currentUser ?: return
         if (current.ownerUid != user.uid) return
+        // Indice admin dei trail: le rules lo considerano valido solo se `code` punta a un calendario di cui si è
+        // ancora owner; le voci create dalle vecchie versioni non hanno `code`, quindi lo si riscrive (idempotente).
+        runCatching {
+            val ref = db.collection("admins").document(user.uid)
+            if (ref.get().await().getString("code").isNullOrBlank())
+                ref.set(mapOf("since" to System.currentTimeMillis(), "code" to code)).await()
+        }
         val email = user.email ?: return
         val masked = maskEmail(email)
         if (current.ownerEmail == masked) return
@@ -1089,7 +1096,10 @@ class CalendarRepository(
                 db.collection("calendars").document(doc.id)
                     .update("editors", FieldValue.arrayRemove(uid)).await()
             }
-            // 3) elimina l'account Firebase
+            // 3) toglie le tracce dell'account dagli indici (email -> uid, admin dei trail): best-effort
+            user.email?.trim()?.lowercase()?.let { runCatching { db.collection("emailIndex").document(it).delete().await() } }
+            runCatching { db.collection("admins").document(uid).delete().await() }
+            // 4) elimina l'account Firebase
             user.delete().await()
             Result.success(Unit)
         } catch (e: Exception) {

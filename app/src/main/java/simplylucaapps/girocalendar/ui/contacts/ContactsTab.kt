@@ -139,7 +139,7 @@ internal fun linkUrl(key: String, raw: String): String {
         "facebook" -> "https://www.facebook.com/$h"
         "youtube" -> "https://www.youtube.com/@$h"
         "tiktok" -> "https://www.tiktok.com/@$h"
-        else -> if (v.contains('.')) "https://$v" else v
+        else -> if (v.contains('.')) "https://$v" else "" // mai uno schema arbitrario (tel:, sms:, content:…)
     }
 }
 
