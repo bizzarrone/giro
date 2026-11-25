@@ -117,10 +117,11 @@ service cloud.firestore {
         allow delete: if isEditor(code);
       }
 
-      // private/owner: email completa dell'owner; private/labels: email dei collaboratori (uid -> email). Lettura solo per utenti loggati (nel doc pubblico
-      // c'è solo la versione mascherata "lu***@dominio"); scrittura solo owner.
+      // private/owner: email completa dell'owner; private/labels: email dei collaboratori (uid -> email). Lettura solo per owner e
+      // collaboratori del calendario: prima bastava un account qualsiasi che conoscesse il codice (nel doc pubblico resta la versione
+      // mascherata "lu***@dominio", che le app mostrano quando questa lettura è negata). Scrittura solo owner.
       match /private/{docId} {
-        allow read: if request.auth != null;
+        allow read: if isEditor(code) || isOwner(code);
         allow create, update: if isOwner(code) && (
           (docId == 'owner' && request.resource.data.keys().hasOnly(['email'])
             && request.resource.data.email is string && request.resource.data.email.size() <= 200)

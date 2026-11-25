@@ -175,6 +175,18 @@ test('[COMPAT] web client writes (giro-web app.js): POI edit, builders, trail me
   await assertSucceeds(updateDoc(ev(as('alice')), { partecipanti: arrayUnion('Alice Rossi'), forse: arrayRemove('Alice Rossi') }));
 });
 
+// ───────────────────────── private emails ─────────────────────────
+test('[SEC] a logged-in stranger cannot read the full owner / collaborator emails', async () => {
+  await assertFails(getDoc(doc(as('mallory'), 'calendars', CODE, 'private', 'owner')));
+  await assertFails(getDoc(doc(as('mallory'), 'calendars', CODE, 'private', 'labels')));
+});
+test('[COMPAT] owner and collaborators still read and write private docs', async () => {
+  await assertSucceeds(getDoc(doc(as('owner'), 'calendars', CODE, 'private', 'owner')));
+  await assertSucceeds(getDoc(doc(as('editor'), 'calendars', CODE, 'private', 'owner')));
+  await assertSucceeds(setDoc(doc(as('owner'), 'calendars', CODE, 'private', 'labels'), { labels: { editor: 'editor@example.com' } }));
+  await assertSucceeds(getDoc(doc(as('editor'), 'calendars', CODE, 'private', 'labels')));
+});
+
 // ───────────────────────── calendar document ─────────────────────────
 test('[SEC] nobody but the owner can change ownerUid / editors', async () => {
   await assertFails(updateDoc(doc(as('mallory'), 'calendars', CODE), { ownerUid: 'mallory' }));
