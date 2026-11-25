@@ -412,7 +412,7 @@ fun EventDetailSheet(
                 DetailRow(
                     iconForLink(event.linkPercorso), routeLabel,
                     showIcon = showFieldIcons,
-                    onClick = { runCatching { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(event.linkPercorso))) } },
+                    onClick = { simplylucaapps.girocalendar.util.openWebLink(context, event.linkPercorso) },
                 )
             }
             if (event.link2.isNotBlank()) {
@@ -421,7 +421,7 @@ fun EventDetailSheet(
                     simplylucaapps.girocalendar.ui.common.platformNameForLink(event.link2)
                         ?: stringResource(R.string.field_other_link),
                     showIcon = showFieldIcons,
-                    onClick = { runCatching { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(event.link2))) } },
+                    onClick = { simplylucaapps.girocalendar.util.openWebLink(context, event.link2) },
                 )
             }
             if (event.video.isNotBlank()) {
@@ -431,7 +431,7 @@ fun EventDetailSheet(
                 DetailRow(
                     Icons.Default.Videocam, videoLabel,
                     showIcon = showFieldIcons,
-                    onClick = { runCatching { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(event.video))) } },
+                    onClick = { simplylucaapps.girocalendar.util.openWebLink(context, event.video) },
                 )
             }
             if (event.trailZone.isNotBlank()) TrailZoneStatus(event.trailZone)
