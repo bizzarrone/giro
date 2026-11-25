@@ -175,6 +175,23 @@ test('[COMPAT] web client writes (giro-web app.js): POI edit, builders, trail me
   await assertSucceeds(updateDoc(ev(as('alice')), { partecipanti: arrayUnion('Alice Rossi'), forse: arrayRemove('Alice Rossi') }));
 });
 
+// ───────────────────────── proposals ─────────────────────────
+const prop = { titolo: 'Giro al lago', data: '30/11/2026', ora: '09:00', proponente: 'Alice', proposedAtMillis: 1 };
+test('[SEC] one account cannot flood a calendar with proposals (random ids)', async () => {
+  await assertFails(setDoc(doc(as('mallory'), 'calendars', CODE, 'proposals', 'randomId0001'), prop));
+  await assertFails(addDoc(collection(as('mallory'), 'calendars', CODE, 'proposals'), prop));
+});
+test('[SEC] a second proposal is refused while the first one is pending', async () => {
+  await assertSucceeds(setDoc(doc(as('mallory'), 'calendars', CODE, 'proposals', 'mallory'), prop));
+  await assertFails(setDoc(doc(as('mallory'), 'calendars', CODE, 'proposals', 'mallory'), { ...prop, titolo: 'spam' }));
+});
+test('[COMPAT] propose with id = uid (CalendarRepository / web app.js), editor approves or rejects', async () => {
+  await assertSucceeds(setDoc(doc(as('alice'), 'calendars', CODE, 'proposals', 'alice'), prop));
+  await assertSucceeds(getDocs(collection(as('editor'), 'calendars', CODE, 'proposals')));
+  await assertSucceeds(deleteDoc(doc(as('editor'), 'calendars', CODE, 'proposals', 'alice')));
+  await assertSucceeds(setDoc(doc(as('alice'), 'calendars', CODE, 'proposals', 'alice'), prop));
+});
+
 // ───────────────────────── calendar document ─────────────────────────
 test('[SEC] nobody but the owner can change ownerUid / editors', async () => {
   await assertFails(updateDoc(doc(as('mallory'), 'calendars', CODE), { ownerUid: 'mallory' }));

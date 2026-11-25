@@ -306,9 +306,9 @@ service cloud.firestore {
 
       match /proposals/{proposalId} {
         allow read: if isEditor(code);
-        // TRANSITORIO: finché le vecchie versioni dell'app (id casuali) sono in giro si accettano entrambi.
-        // Quando tutti hanno aggiornato: ripristinare `proposalId == request.auth.uid` (una sola proposta per utente).
-        allow create: if request.auth != null && !isBlocked(code) && request.resource.data.titolo is string
+        // Una sola proposta in attesa per utente e calendario (id = uid, come scrivono l'app dalla 2.17 e il sito):
+        // è il limite contro lo spam di proposte (ognuna manda una notifica push agli editor).
+        allow create: if request.auth != null && proposalId == request.auth.uid && !isBlocked(code) && request.resource.data.titolo is string
           && request.resource.data.titolo.size() > 0
           && request.resource.data.titolo.size() < 200
           && validProposal()
