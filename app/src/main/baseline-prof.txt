@@ -1,0 +1,4 @@
+# Baseline profile: tutto il codice dell'app viene precompilato (avvio a freddo e prime schermate più veloci).
+# Le librerie (Compose, Firebase, AndroidX) portano già il loro profilo, che AGP unisce a questo.
+HSPLsimplylucaapps/girocalendar/**;->**(**)**
+Lsimplylucaapps/girocalendar/**;

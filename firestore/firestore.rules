@@ -1,0 +1,564 @@
+rules_version = '2';
+
+// GiroCalendar — regole Firestore (piano Spark, senza Cloud Functions)
+//
+// Modello: calendars/{code} è un calendario di uscite in bici. Il codice è l'identità (univoco).
+//   - lettura: PUBBLICA su tutto ciò che sta sotto calendars/
+//   - creazione calendars/{code}: utente autenticato; ownerUid == uid; editors == [uid]
+//   - modifica del documento calendar: solo l'owner, e non può cambiare code/createdAtMillis
+//     (può cambiare name/description/editors/logo/ownerEmail/listed)
+//   - trasferimento proprietà: l'owner può cambiare SOLO ownerUid, verso un uid già
+//     in editors (usato da "Elimina account" per non lasciare calendari orfani)
+//   - un editor non-owner può rimuovere SE STESSO dalla lista editors (scollegarsi)
+//   - scrittura su events/: chiunque il cui uid è in calendar.editors
+//
+// "editors" è una lista di UID Firebase. L'owner aggiunge un collaboratore inserendo il suo UID.
+// "editorLabels" (uid -> email) è scritto insieme a "editors" quando l'invito avviene per
+// email, solo per mostrare chi è stato aggiunto nella UI (nessuna regola dedicata: rientra
+// nella scrittura libera dei campi del calendar concessa all'owner).
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function calendarDoc(code) {
+      return get(/databases/$(database)/documents/calendars/$(code)).data;
+    }
+
+    // Super-admin dell'app (sviluppatore), riconosciuto dall'email Google verificata.
+    // Può modificare / rendere privato / eliminare QUALSIASI calendario (moderazione).
+    function isSuper() {
+      return request.auth != null
+        && request.auth.token.email_verified == true
+        && request.auth.token.email == 'bizzarrone@gmail.com';
+    }
+
+    function isOwner(code) {
+      return request.auth != null && (calendarDoc(code).ownerUid == request.auth.uid || isSuper());
+    }
+
+    // Lista nera per account: calendars/{code}/blocks/{uid} {level: 'edit' | 'ban'}.
+    //   edit = non può più modificare nulla né inviare proposte (da loggato);
+    //   ban  = in più non può leggere il calendario (da loggato).
+    // Limite noto: i calendari restano leggibili/proponibili senza login, quindi il blocco
+    // vale per l'account, non per chi si scollega.
+    // L'id del documento è l'uid dell'account OPPURE la sua email in minuscolo (così si può bloccare
+    // scrivendo solo l'email, senza che quell'account sia mai stato "indicizzato").
+    function blockOf(code, id) {
+      return exists(/databases/$(database)/documents/calendars/$(code)/blocks/$(id))
+        ? get(/databases/$(database)/documents/calendars/$(code)/blocks/$(id)).data.level
+        : '';
+    }
+    function myEmail() {
+      return request.auth.token.email != null && request.auth.token.email_verified == true
+        ? request.auth.token.email.lower() : '';
+    }
+    function blockLevel(code) {
+      return request.auth == null ? ''
+        : ((blockOf(code, request.auth.uid) == 'ban' || (myEmail() != '' && blockOf(code, myEmail()) == 'ban')) ? 'ban'
+        : ((blockOf(code, request.auth.uid) != '' || (myEmail() != '' && blockOf(code, myEmail()) != '')) ? 'edit' : ''));
+    }
+    function isBlocked(code) { return blockLevel(code) != ''; }
+    function isBanned(code) { return blockLevel(code) == 'ban'; }
+
+    // Mercatino: annunci (bici/accessori) con foto, descrizione e contatto. Visibili solo nel calendario
+    // (calendars/{code}/listings) oppure in tutti i calendari (listings/ globale). Li crea qualunque account
+    // loggato e non bloccato; li modifica/toglie il proprietario; owner/collaboratori del calendario possono toglierli.
+    function validListing() {
+      let d = request.resource.data;
+      return d.keys().hasOnly(['scope', 'fromCode', 'title', 'description', 'price', 'category', 'thumb', 'photoCount', 'photos', 'contact', 'ownerUid', 'ownerName', 'createdAtMillis', 'sold', 'phone', 'whatsapp', 'email', 'other'])
+        && (!('phone' in d) || (d.phone is string && d.phone.size() <= 40))
+        && (!('email' in d) || (d.email is string && d.email.size() <= 100))
+        && (!('other' in d) || (d.other is string && d.other.size() <= 120))
+        && (!('whatsapp' in d) || d.whatsapp is bool)
+        && d.title is string && d.title.size() > 0 && d.title.size() <= 120
+        && d.description is string && d.description.size() <= 2000
+        && d.contact is string && d.contact.size() > 0 && d.contact.size() <= 160
+        && d.price is string && d.price.size() <= 40
+        && (!('photos' in d) || (d.photos is list && d.photos.size() <= 3))
+        && (!('thumb' in d) || (d.thumb is string && d.thumb.size() <= 60000))
+        && (!('photoCount' in d) || (d.photoCount is int && d.photoCount >= 0 && d.photoCount <= 8))
+        && d.fromCode is string && d.ownerUid == request.auth.uid;
+    }
+
+    // Proposte: limiti di tipo e dimensione (evita documenti gonfiati con base64 arbitrario).
+    function strMax(d, k, n) { return !(k in d) || (d[k] is string && d[k].size() <= n); }
+    function validProposal() {
+      let d = request.resource.data;
+      return strMax(d, 'data', 20) && strMax(d, 'ora', 10) && strMax(d, 'localita', 200)
+        && strMax(d, 'ritrovo', 300) && strMax(d, 'proponente', 100) && strMax(d, 'waProponente', 30)
+        && strMax(d, 'difficolta', 40) && strMax(d, 'linkPercorso', 500) && strMax(d, 'link2', 500)
+        && strMax(d, 'video', 500) && strMax(d, 'note', 3000) && strMax(d, 'gpxFileName', 150)
+        && strMax(d, 'audioMimeType', 60)
+        && strMax(d, 'cardBgData', 300000) && strMax(d, 'photoData', 500000)
+        && strMax(d, 'gpxData', 400000) && strMax(d, 'audioData', 700000)
+        && (!('proposedAtMillis' in d) || d.proposedAtMillis is int);
+    }
+
+    function isEditor(code) {
+      return request.auth != null && ((request.auth.uid in calendarDoc(code).editors && !isBlocked(code)) || isSuper());
+    }
+
+    match /calendars/{code} {
+      // list resta libero (le query non possono valutare il blocco per documento); get e
+      // sotto-collezioni pubbliche negano l'accesso agli account bannati.
+      allow list: if true;
+      allow get: if !isBanned(code);
+
+      // blocks/{uid}: lista nera. Gestita da owner e collaboratori (mai l'owner né se stessi).
+      match /blocks/{uid} {
+        allow get: if request.auth != null && (request.auth.uid == uid || myEmail() == uid || isEditor(code));
+        allow list: if isEditor(code);
+        allow create, update: if isEditor(code)
+          && uid != calendarDoc(code).ownerUid && uid != request.auth.uid
+          && uid != myEmail() && (!exists(/databases/$(database)/documents/calendars/$(code)/private/owner) || uid != get(/databases/$(database)/documents/calendars/$(code)/private/owner).data.email.lower())
+          && request.resource.data.keys().hasOnly(['level', 'label', 'byUid', 'atMillis'])
+          && request.resource.data.level in ['edit', 'ban']
+          && request.resource.data.byUid == request.auth.uid;
+        allow delete: if isEditor(code);
+      }
+
+      // private/owner: email completa dell'owner; private/labels: email dei collaboratori (uid -> email). Lettura solo per utenti loggati (nel doc pubblico
+      // c'è solo la versione mascherata "lu***@dominio"); scrittura solo owner.
+      match /private/{docId} {
+        allow read: if request.auth != null;
+        allow create, update: if isOwner(code) && (
+          (docId == 'owner' && request.resource.data.keys().hasOnly(['email'])
+            && request.resource.data.email is string && request.resource.data.email.size() <= 200)
+          || (docId == 'labels' && request.resource.data.keys().hasOnly(['labels'])
+            && request.resource.data.labels is map && request.resource.data.labels.size() <= 100));
+        allow delete: if isOwner(code);
+      }
+
+      // ownerEmail nel doc pubblico: solo mascherato (o assente).
+      function maskedOnly() {
+        let d = request.resource.data;
+        return !('ownerEmail' in d) || d.ownerEmail == '' || d.ownerEmail.matches('^[^@*]{1,2}\\*\\*\\*@[^@]+$');
+      }
+
+      // in update il valore può restare invariato (calendari non ancora migrati), mai cambiare in chiaro.
+      function maskedOrSame() {
+        return maskedOnly() || request.resource.data.get('ownerEmail', '') == resource.data.get('ownerEmail', '');
+      }
+
+      // TRANSITORIO: la create accetta ancora l'email in chiaro delle vecchie app (poi rimettere maskedOnly()
+      // e rilanciare migrate_owner_email.py per mascherare quelle create nel frattempo).
+      allow create: if request.auth != null
+        && request.resource.data.ownerUid == request.auth.uid
+        && request.resource.data.code == code
+        && request.resource.data.editors == [request.auth.uid]
+        && request.resource.data.name is string
+        && request.resource.data.name.size() > 0;
+
+      // update: immutabili code/createdAtMillis sempre.
+      // Caso 1 — owner normale: non può cambiare ownerUid; name/description/editors/
+      //   logo/ownerEmail/listed liberi; resta sempre tra gli editor.
+      // Caso 2 — trasferimento proprietà (usato da "Elimina account"): l'owner
+      //   passa ownerUid a un uid già presente negli editors attuali, cambiando
+      //   solo ownerUid (nessun altro campo in questa scrittura).
+      allow update: if request.resource.data.code == resource.data.code
+        && maskedOrSame()
+        && request.resource.data.createdAtMillis == resource.data.createdAtMillis
+        && (
+          (isOwner(code)
+            && request.resource.data.ownerUid == resource.data.ownerUid
+            && (resource.data.ownerUid in request.resource.data.editors))
+          ||
+          (isOwner(code)
+            && request.resource.data.ownerUid != resource.data.ownerUid
+            && request.resource.data.ownerUid in resource.data.editors
+            && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['ownerUid']))
+        );
+
+      // Un editor (non owner) può rimuovere SE STESSO dagli editors — usato da
+      // "Elimina account" per scollegarsi dai calendari altrui a cui collabora.
+      allow update: if isEditor(code) && !isOwner(code)
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['editors'])
+        && request.resource.data.editors == resource.data.editors.removeAll([request.auth.uid]);
+
+      // Contatore aperture (statistica approssimativa, dialog Info): chiunque apra il
+      // calendario, anche senza login, può incrementarlo di ESATTAMENTE 1 — nessun altro
+      // campo cambia, e non può essere impostato a un valore arbitrario (evita che un
+      // client malevolo lo azzeri o lo gonfi a piacere in un colpo solo). I calendari creati
+      // prima che questo campo esistesse non ce l'hanno ancora: trattali come partiti da 0.
+      allow update: if request.resource.data.diff(resource.data).affectedKeys().hasOnly(['openCount'])
+        && request.resource.data.openCount == (resource.data.openCount is int ? resource.data.openCount : 0) + 1;
+
+      allow delete: if isOwner(code);
+
+      // Un array resta uguale, oppure guadagna o perde esattamente un elemento (aggiunta/rimozione del proprio nome).
+      function oneStep(n, o) {
+        return n == o
+          || (n.size() == o.size() + 1 && n.hasAll(o))
+          || (n.size() == o.size() - 1 && o.hasAll(n));
+      }
+
+      match /events/{eventId} {
+        allow read: if !isBanned(code);
+        allow write: if isEditor(code);
+
+        // "Partecipa" (come su Spaccasassi Eventi): chiunque, anche senza login, può
+        // aggiungere o togliere IL PROPRIO nome dalla lista partecipanti — mai riscrivere
+        // l'intero array, altrimenti un ospite potrebbe cancellare i nomi altrui. La
+        // differenza tra l'array nuovo e quello attuale deve essere di esattamente un
+        // elemento (aggiunto o rimosso), e nessun altro campo del documento cambia.
+        // Stessa regola per «Forse» (campo forse): le due liste possono cambiare insieme (es. da «Forse» a
+        // «Partecipo»), ciascuna di al più un elemento.
+        allow update: if request.resource.data.diff(resource.data).affectedKeys().hasOnly(['partecipanti', 'forse'])
+          && oneStep(request.resource.data.get('partecipanti', []), resource.data.get('partecipanti', []))
+          && oneStep(request.resource.data.get('forse', []), resource.data.get('forse', []));
+
+        // comments/{id}: commenti sulla scheda di un'uscita (prossima o passata). Leggono e scrivono
+        // solo gli utenti loggati e non bloccati. Modifica: solo l'autore, solo testo (+ editedAtMillis).
+        // Eliminazione: l'autore oppure owner/collaboratori del calendario (moderazione).
+        match /comments/{commentId} {
+          allow read: if request.auth != null && !isBanned(code);
+          allow create: if request.auth != null && !isBlocked(code)
+            && request.resource.data.keys().hasOnly(['authorUid', 'authorName', 'text', 'createdAtMillis'])
+            && request.resource.data.authorUid == request.auth.uid
+            && request.resource.data.authorName is string && request.resource.data.authorName.size() <= 100
+            && request.resource.data.text is string
+            && request.resource.data.text.size() > 0 && request.resource.data.text.size() <= 1000
+            && request.resource.data.createdAtMillis is int;
+          allow update: if request.auth != null && !isBlocked(code)
+            && resource.data.authorUid == request.auth.uid
+            && request.resource.data.text is string
+            && request.resource.data.text.size() > 0 && request.resource.data.text.size() <= 1000
+            && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['text', 'editedAtMillis']);
+          allow delete: if request.auth != null
+            && (resource.data.authorUid == request.auth.uid || isEditor(code));
+        }
+
+        // audio/clip: la clip audio dell'evento, in un documento SEPARATO dall'evento stesso
+        // per avere un limite di 1 MiB Firestore indipendente da cardBgData/photoData/gpxData
+        // (che condividono già quel limite sul documento events/{eventId}). Stessi permessi
+        // dell'evento: lettura pubblica, scrittura solo editor.
+        match /audio/{audioId} {
+          allow read: if true;
+          allow write: if isEditor(code);
+        }
+      }
+
+      // archived/{eventId}: eventi tolti dalla vista normale ma conservati per essere
+      // consultati o "ripescati" come nuovo evento, invece di essere persi con una
+      // cancellazione definitiva. Stesso schema di events/, stessi permessi (solo owner/editor,
+      // niente scrittura pubblica: un evento archiviato non ha più bisogno di "Partecipa").
+      match /archived/{eventId} {
+        allow read: if isEditor(code);
+        allow write: if isEditor(code);
+
+        match /audio/{audioId} {
+          allow read: if isEditor(code);
+          allow write: if isEditor(code);
+        }
+      }
+
+      // epics/{id}: giri "da ripetere ogni anno", schede a sé stanti (no data/ora), popolate
+      // clonando un evento esistente. Stessi permessi di events/ (lettura pubblica come
+      // vetrina del gruppo, scrittura solo owner/editor): a differenza di archived/ non sono
+      // eventi "tolti dalla vista", sono contenuto pensato per essere consultato da chiunque.
+      match /epics/{epicId} {
+        allow read: if !isBanned(code);
+        allow write: if isEditor(code);
+
+        match /audio/{audioId} {
+          allow read: if true;
+          allow write: if isEditor(code);
+        }
+      }
+
+      // proposals/{proposalId}: "Proponi evento", aperto a chiunque anche senza login
+      // (come il form pubblico di Spaccasassi). Creazione libera ma con validazione dei
+      // campi lato rules (titolo/data non vuoti, campi attesi); lettura/eliminazione
+      // riservate a owner/editor (approvazione = crea l'evento vero + elimina la proposta,
+      // due scritture separate dal client, non una singola operazione atomica).
+      // contacts/{uid}: scheda contatti del collaboratore (una per calendario, id = uid).
+      // Lettura: qualsiasi utente loggato. Scrittura: solo il proprietario della scheda.
+      // Eliminazione: lui stesso, l'owner del calendario o il super-admin.
+      match /contacts/{uid} {
+        // get singolo pubblico solo se il proprietario ha attivato "condividi con link" (shared);
+        // l'elenco è per gli utenti loggati.
+        allow get: if request.auth != null || resource.data.get('shared', false) == true;
+        allow list: if request.auth != null;
+        allow create, update: if request.auth != null && request.auth.uid == uid
+          && request.resource.data.keys().hasOnly(['uid','nome','cognome','soprannome','email','phone','links','altroLabel','altroUrl','photoData','shared','updatedAt'])
+          && request.resource.data.uid == uid
+          && request.resource.data.nome is string
+          && request.resource.data.nome.size() > 0 && request.resource.data.nome.size() <= 60
+          && (!('photoData' in request.resource.data) || (request.resource.data.photoData is string && request.resource.data.photoData.size() <= 60000))
+          && (!('links' in request.resource.data) || (request.resource.data.links is map && request.resource.data.links.size() <= 12));
+        allow delete: if request.auth != null && (request.auth.uid == uid || isOwner(code));
+      }
+
+      // meta/group: scheda «GRUPPO» del calendario (link del gruppo: WhatsApp, Telegram, …).
+      // Lettura pubblica; creazione, modifica ed eliminazione solo per gli editor del calendario.
+      match /meta/group {
+        allow read: if true;
+        allow create, update: if isEditor(code)
+          && request.resource.data.keys().hasOnly(['title','desc','links','altroLabel','altroUrl','updatedAt'])
+          && (!('title' in request.resource.data) || (request.resource.data.title is string && request.resource.data.title.size() <= 80))
+          && (!('desc' in request.resource.data) || (request.resource.data.desc is string && request.resource.data.desc.size() <= 600))
+          && (!('links' in request.resource.data) || (request.resource.data.links is map && request.resource.data.links.size() <= 12));
+        allow delete: if isEditor(code);
+      }
+
+      match /proposals/{proposalId} {
+        allow read: if isEditor(code);
+        // TRANSITORIO: finché le vecchie versioni dell'app (id casuali) sono in giro si accettano entrambi.
+        // Quando tutti hanno aggiornato: ripristinare `proposalId == request.auth.uid` (una sola proposta per utente).
+        allow create: if request.auth != null && !isBlocked(code) && request.resource.data.titolo is string
+          && request.resource.data.titolo.size() > 0
+          && request.resource.data.titolo.size() < 200
+          && validProposal()
+          && request.resource.data.keys().hasOnly([
+            'titolo', 'data', 'ora', 'localita', 'ritrovo', 'proponente', 'waProponente',
+            'difficolta', 'linkPercorso', 'link2', 'video', 'note', 'proposedAtMillis',
+            'cardBgData', 'photoData', 'gpxData', 'gpxFileName', 'audioData', 'audioMimeType'
+          ]);
+        allow update: if false;
+        allow delete: if isEditor(code);
+      }
+
+      match /listings/{listingId} {
+        allow read: if !isBanned(code);
+        allow create: if request.auth != null && !isBlocked(code) && validListing();
+        allow update: if request.auth != null && !isBlocked(code) && resource.data.ownerUid == request.auth.uid && validListing();
+        allow delete: if request.auth != null && (resource.data.ownerUid == request.auth.uid || isEditor(code));
+
+        // foto a piena qualità: un documento per foto (max 8), così non pesano sul documento dell'annuncio
+        match /photos/{pid} {
+          allow read: if !isBanned(code);
+          allow create, update: if request.auth != null && !isBlocked(code)
+            && get(/databases/$(database)/documents/calendars/$(code)/listings/$(listingId)).data.ownerUid == request.auth.uid
+            && request.resource.data.keys().hasOnly(['idx', 'data']) && request.resource.data.data is string && request.resource.data.data.size() <= 900000;
+          allow delete: if request.auth != null
+            && (get(/databases/$(database)/documents/calendars/$(code)/listings/$(listingId)).data.ownerUid == request.auth.uid || isEditor(code));
+        }
+      }
+
+      // announcements/{id}: "Comunicazioni" — più annunci indipendenti con data, owner-only.
+      // reports/{id}: segnalazioni sul sentiero condivise con chi usa il calendario (albero caduto, fango, pericolo…).
+      // Lettura pubblica come il resto del calendario; crea chi è loggato con byUid == uid; elimina chi l'ha creata
+      // o un editor del calendario. Non si modificano (si elimina e si rifà).
+      match /reports/{reportId} {
+        allow read: if true;
+        allow create: if request.auth != null
+          && request.resource.data.byUid == request.auth.uid
+          && request.resource.data.type is string && request.resource.data.type.size() <= 20
+          && request.resource.data.lat is number && request.resource.data.lon is number
+          && request.resource.data.atMillis is int
+          && request.resource.data.byName is string && request.resource.data.byName.size() <= 60
+          && request.resource.data.note is string && request.resource.data.note.size() <= 200;
+        allow update: if false;
+        allow delete: if request.auth != null
+          && (resource.data.byUid == request.auth.uid
+              || request.auth.uid in get(/databases/$(database)/documents/calendars/$(code)).data.editors);
+
+        // votes/{uid}: «c'è ancora» / «pericolo rimosso» di chi passa dal punto. Un voto per utente (l'id è il suo uid),
+        // modificabile da lui; lettura pubblica come la segnalazione. L'esito (rimossa con 2 utenti o con l'autore) lo calcola l'app.
+        match /votes/{voteUid} {
+          allow read: if true;
+          allow create, update: if request.auth != null && voteUid == request.auth.uid
+            && request.resource.data.v in ['confirm', 'removed']
+            && request.resource.data.at is int
+            && request.resource.data.name is string && request.resource.data.name.size() <= 60;
+          allow delete: if request.auth != null && voteUid == request.auth.uid;
+        }
+      }
+
+      // links/{id}: eventi di altri calendari mostrati in questo (sola lettura, partecipanti e commenti restano sull'evento d'origine).
+      match /links/{linkId} {
+        allow read: if !isBanned(code);
+        allow create, update: if isEditor(code)
+          && request.resource.data.keys().hasOnly(['srcCode', 'srcEventId', 'byUid', 'atMillis'])
+          && request.resource.data.srcCode is string && request.resource.data.srcCode.size() <= 40
+          && request.resource.data.srcEventId is string && request.resource.data.srcEventId.size() <= 100
+          && request.resource.data.byUid == request.auth.uid
+          && request.resource.data.atMillis is int;
+        allow delete: if isEditor(code);
+      }
+
+      match /announcements/{announcementId} {
+        allow read: if !isBanned(code);
+        allow create: if isOwner(code)
+          && request.resource.data.text is string
+          && request.resource.data.text.size() > 0;
+        // modifica (penna in admin): solo owner, testo non vuoto, data di pubblicazione immutabile
+        allow update: if isOwner(code)
+          && request.resource.data.text is string
+          && request.resource.data.text.size() > 0
+          && request.resource.data.createdAtMillis == resource.data.createdAtMillis;
+        allow delete: if isOwner(code);
+      }
+    }
+
+    // admins/{uid}: indice di sola presenza (nessun campo) scritto quando un utente crea il
+    // suo primo calendario (vedi CalendarRepository.createCalendar) — "admin" = owner di
+    // almeno un calendario. Serve solo perché le Security Rules non possono fare query con
+    // where, solo exists()/get() su un path esatto: senza questo indice non c'è modo di
+    // verificare "isOwner di QUALCHE calendario" lato rules per i permessi su trails/.
+    // Scrittura SOLO se l'utente è davvero owner del calendario indicato in `code` (altrimenti
+    // chiunque potrebbe farsi admin dei trail). Lettura: solo la propria voce (isTrailAdmin usa
+    // exists(), che non passa dalle regole di lettura). Le voci già esistenti restano valide.
+    match /admins/{uid} {
+      allow read: if request.auth != null && request.auth.uid == uid;
+      allow create, update: if request.auth != null && request.auth.uid == uid
+        && request.resource.data.keys().hasOnly(['since', 'code'])
+        && request.resource.data.code is string
+        && calendarDoc(request.resource.data.code).ownerUid == request.auth.uid;
+      allow delete: if request.auth != null && request.auth.uid == uid;
+    }
+
+    function isTrailAdmin() {
+      return request.auth != null
+        && exists(/databases/$(database)/documents/admins/$(request.auth.uid));
+    }
+
+    // trailLog/{id}: registro append-only delle modifiche ai trail (chi, cosa, quando), scritto dal
+    // client con nome/email reali dell'utente per scoraggiare abusi. Lettura solo admin; l'email
+    // deve coincidere con quella del token (niente identità false). Mai modificabile né cancellabile.
+    match /trailLog/{logId} {
+      allow read: if isTrailAdmin();
+      allow create: if request.auth != null
+        && request.resource.data.userUid == request.auth.uid
+        && request.resource.data.userEmail == request.auth.token.email;
+      allow update, delete: if false;
+    }
+
+    // trailZones/{id}: perimetri (poligoni) delle zone dei trail, solo informativi. id = nome zona normalizzato.
+    // `polygon` = encoded polyline dei vertici. Lettura pubblica; scrive chi è loggato (un solo poligono per zona,
+    // ridisegnabile); elimina chi l'ha creato o un admin.
+    match /trailZones/{zoneId} {
+      allow read: if true;
+      allow create: if request.auth != null
+        && request.resource.data.zone is string && request.resource.data.zone.size() > 0
+        && request.resource.data.polygon is string
+        && request.resource.data.createdByUid == request.auth.uid;
+      allow update: if request.auth != null
+        && request.resource.data.zone == resource.data.zone
+        && request.resource.data.createdByUid == resource.data.createdByUid
+        && request.resource.data.polygon is string;
+      allow delete: if request.auth != null
+        && (resource.data.createdByUid == request.auth.uid || isTrailAdmin());
+    }
+
+    // pois/{id}: punti di interesse sulla mappa (ritrovo, vetta, area picnic, altro). Lettura pubblica; crea e
+    // modifica chi è loggato; elimina chi l'ha creato o un admin.
+    match /pois/{poiId} {
+      allow read: if true;
+      allow create: if request.auth != null
+        && request.resource.data.createdByUid == request.auth.uid
+        && request.resource.data.name is string && request.resource.data.name.size() > 0 && request.resource.data.name.size() <= 100
+        && request.resource.data.desc is string && request.resource.data.desc.size() <= 2000
+        && request.resource.data.type is string && request.resource.data.type.size() <= 20
+        && request.resource.data.lat is number && request.resource.data.lon is number;
+      allow update: if request.auth != null
+        && request.resource.data.createdByUid == resource.data.createdByUid
+        && request.resource.data.name is string && request.resource.data.name.size() > 0 && request.resource.data.name.size() <= 100
+        && request.resource.data.desc is string && request.resource.data.desc.size() <= 2000
+        && request.resource.data.type is string && request.resource.data.type.size() <= 20
+        && request.resource.data.lat is number && request.resource.data.lon is number;
+      allow delete: if request.auth != null
+        && (resource.data.createdByUid == request.auth.uid || isTrailAdmin());
+    }
+
+    // trails/{trailId}: sentieri e stato di percorribilità, condivisi da tutta l'app (non
+    // legati a un calendario). Tab "TRAIL". "Admin" = owner di almeno un calendario.
+    match /trails/{trailId} {
+      allow read: if true;
+
+      // Un admin può ricreare un trail eliminato da altri (annulla dal LOG): mantiene il createdByUid originale.
+      allow create: if request.auth != null
+        && (request.resource.data.createdByUid == request.auth.uid || isTrailAdmin())
+        && request.resource.data.name is string && request.resource.data.name.size() > 0
+        && request.resource.data.zone is string;
+
+      // Lo stato/lastUpdate* si aggiornano solo insieme a un commento (client scrive prima il
+      // commento poi questo update): nessuna regola dedicata al singolo campo, basta che
+      // l'utente sia loggato — è comunque un dato pubblico non distruttivo (si corregge con
+      // un nuovo commento, la history resta in comments/).
+      allow update: if request.auth != null
+        && resource.data.createdByUid == request.resource.data.createdByUid
+        && resource.data.name == request.resource.data.name
+        && resource.data.zone == request.resource.data.zone;
+
+      // Rinomina zona: solo un admin, e cambia solo il campo zone (rinomina dell'area in blocco).
+      allow update: if isTrailAdmin()
+        && request.resource.data.zone is string && request.resource.data.zone.size() > 0
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['zone']);
+
+      // Rinomina il trail: solo chi l'ha creato o un admin, e cambia solo il campo name.
+      allow update: if request.auth != null
+        && (resource.data.createdByUid == request.auth.uid || isTrailAdmin())
+        && request.resource.data.name is string && request.resource.data.name.size() > 0 && request.resource.data.name.size() <= 120
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['name']);
+
+      // Elimina: solo chi l'ha creato, o un admin.
+      allow delete: if request.auth != null
+        && (resource.data.createdByUid == request.auth.uid || isTrailAdmin());
+
+      match /comments/{commentId} {
+        allow read: if true;
+        allow create: if request.auth != null
+          && (request.resource.data.authorUid == request.auth.uid || isTrailAdmin())
+          && request.resource.data.text is string;
+        // Modifica: solo l'autore, e solo il testo (+ editedAtMillis); autore, stato e data restano.
+        allow update: if request.auth != null
+          && resource.data.authorUid == request.auth.uid
+          && request.resource.data.text is string
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['text', 'editedAtMillis']);
+        allow delete: if request.auth != null
+          && (resource.data.authorUid == request.auth.uid || isTrailAdmin());
+      }
+    }
+
+    // users/{uid}: dati privati dell'utente — per ora solo "recents" (ultimi calendari
+    // aperti), per farli seguire l'account su più dispositivi. Solo il proprietario può
+    // leggere/scrivere il proprio documento.
+    match /users/{uid} {
+      allow read, write: if request.auth != null && request.auth.uid == uid;
+
+      // users/{uid}/jobs/{id}: lavori della tab "Officina", privati.
+      match /jobs/{jobId} {
+        allow read, write: if request.auth != null && request.auth.uid == uid;
+      }
+
+      // users/{uid}/rides/last: ultimo giro registrato (GPX compresso), privato, scade dopo 30 giorni.
+      match /rides/{rideId} {
+        allow read, write: if request.auth != null && request.auth.uid == uid;
+      }
+
+      // users/{uid}/bikes/{id}: biciclette della tab "Officina" (max 10, limite lato client).
+      match /bikes/{bikeId} {
+        allow read, write: if request.auth != null && request.auth.uid == uid;
+      }
+    }
+
+    // listings/{id}: annunci del Mercatino visibili in tutti i calendari.
+    match /listings/{listingId} {
+      allow read: if true;
+      allow create: if request.auth != null && !isBlocked(request.resource.data.fromCode) && validListing();
+      allow update: if request.auth != null && resource.data.ownerUid == request.auth.uid && validListing();
+      allow delete: if request.auth != null && (resource.data.ownerUid == request.auth.uid || isSuper());
+
+      match /photos/{pid} {
+        allow read: if true;
+        allow create, update: if request.auth != null
+          && get(/databases/$(database)/documents/listings/$(listingId)).data.ownerUid == request.auth.uid
+          && request.resource.data.keys().hasOnly(['idx', 'data']) && request.resource.data.data is string && request.resource.data.data.size() <= 900000;
+        allow delete: if request.auth != null
+          && (get(/databases/$(database)/documents/listings/$(listingId)).data.ownerUid == request.auth.uid || isSuper());
+      }
+    }
+
+    // emailIndex/{email}: mappa email di login -> uid, per invitare un collaboratore
+    // scrivendo la sua email invece del codice utente. Ogni utente scrive SOLO la propria
+    // voce (self-registrazione al login); lettura aperta a chiunque sia autenticato, serve
+    // solo a risolvere l'uid e non espone altro dell'account.
+    match /emailIndex/{email} {
+      allow read: if request.auth != null;
+      allow write: if request.auth != null
+        && request.auth.uid == request.resource.data.uid
+        && email == request.auth.token.email.lower();
+    }
+  }
+}

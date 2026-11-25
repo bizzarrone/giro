@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Theme.AppCompat (non solo android:Theme.Material) richiesto perché MainActivity
+         estende AppCompatActivity — necessario per far funzionare davvero
+         AppCompatDelegate.setApplicationLocales() (il cambio lingua da Preferenze), non solo
+         per compilare: senza un parent Theme.AppCompat l'app va in crash a runtime con
+         "You need to use a Theme.AppCompat theme (or descendant) with this activity." Tutto
+         il resto della UI resta comunque Compose/Material3, questo tema serve solo da guscio
+         per l'Activity. -->
+    <style name="Theme.GiroCalendar" parent="Theme.AppCompat.DayNight.NoActionBar" />
+</resources>

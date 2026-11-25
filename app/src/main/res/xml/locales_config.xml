@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Dichiara le lingue supportate dall'app (richiesto per il per-app language picker di sistema
+  su Android 13+ con targetSdk 33+, e per rendere AppCompatDelegate.setApplicationLocales più
+  affidabile su tutte le versioni). Deve restare allineato alle cartelle values-<lang>/ presenti.
+-->
+<locale-config xmlns:android="http://schemas.android.com/apk/res/android">
+    <locale android:name="it" />
+    <locale android:name="en" />
+</locale-config>

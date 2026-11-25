@@ -1,0 +1,6 @@
+{
+  "_comment": "Esempio: crea il tuo progetto su https://console.firebase.google.com, registra l'app Android (applicationId simplylucaapps.girocalendar e la variante .debug) e scarica il vero google-services.json in app/ (non va committato).",
+  "project_info": { "project_number": "000000000000", "project_id": "your-project-id", "storage_bucket": "your-project-id.firebasestorage.app" },
+  "client": [],
+  "configuration_version": "1"
+}

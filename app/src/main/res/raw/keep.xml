@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  GoogleAuthRepository.webClientId() looks up "default_web_client_id" via
+  Resources.getIdentifier() (a dynamic, string-built lookup), so R8's resource shrinker can't see
+  any static reference to it and drops it as "not reachable" — this silently broke Google Sign-In
+  on release builds (isShrinkResources = true): getIdentifier() returned 0 and signIn() bailed out
+  before ever touching Credential Manager, with no exception to log. Confirmed via
+  app/build/outputs/mapping/release/resources.txt: "string:default_web_client_id:... is not
+  reachable." before this file existed.
+-->
+<resources xmlns:tools="http://schemas.android.com/tools"
+    tools:keep="@string/default_web_client_id" />
